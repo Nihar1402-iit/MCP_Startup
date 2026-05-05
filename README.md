@@ -112,3 +112,18 @@ docker compose up --build
 ```
 
 Note: Requires Docker daemon running.
+
+## Deploy on Vercel (frontend)
+
+Repository: `https://github.com/Nihar1402-iit/MCP_Startup.git`
+
+1. Import the repo in Vercel.
+2. Set **Root Directory** to `frontend`.
+3. Build command: `npm run build`
+4. Output directory: `dist`
+5. Add env var `VITE_API_BASE` to your backend URL (for example, `https://your-backend.example.com`).
+6. Deploy.
+
+Important:
+- This project's backend uses Express + SQLite + scheduler jobs.
+- Vercel is best for the frontend here; host backend on a server platform (Render/Railway/Fly/EC2) for persistent DB + cron behavior.
