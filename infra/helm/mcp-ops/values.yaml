@@ -1,0 +1,16 @@
+backend:
+  image: mcp-ops-backend:latest
+  replicaCount: 1
+  servicePort: 4000
+
+frontend:
+  image: mcp-ops-frontend:latest
+  replicaCount: 1
+  servicePort: 80
+
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: false
+  host: mcp-ops.local

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-ops-backend
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: mcp-ops-backend
+  ports:
+    - port: {{ .Values.backend.servicePort }}
+      targetPort: {{ .Values.backend.servicePort }}

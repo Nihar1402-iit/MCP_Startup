@@ -1,0 +1,6 @@
+apiVersion: v2
+name: mcp-ops
+description: MCP-Ops self-serve DevOps automation platform
+version: 0.1.0
+appVersion: "0.1.0"
+type: application
