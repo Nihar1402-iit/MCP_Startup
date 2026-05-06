@@ -34,6 +34,10 @@ const userCols = db.prepare("PRAGMA table_info(users)").all();
 if (!userCols.some((c) => c.name === "password_hash")) {
   db.exec("ALTER TABLE users ADD COLUMN password_hash TEXT");
 }
+const integrationCols = db.prepare("PRAGMA table_info(user_integrations)").all();
+if (!integrationCols.some((c) => c.name === "slack_user_id")) {
+  db.exec("ALTER TABLE user_integrations ADD COLUMN slack_user_id TEXT");
+}
 
 export const listTasks = () => db.prepare("SELECT * FROM tasks ORDER BY created_at DESC").all();
 
@@ -160,10 +164,11 @@ export function listUsers() {
 export function upsertUserIntegrations(userId, input) {
   db.prepare(
     `INSERT INTO user_integrations
-      (user_id, slack_webhook_url, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (user_id, slack_webhook_url, slack_user_id, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET
       slack_webhook_url = excluded.slack_webhook_url,
+      slack_user_id = COALESCE(excluded.slack_user_id, user_integrations.slack_user_id),
       smtp_host = excluded.smtp_host,
       smtp_port = excluded.smtp_port,
       smtp_secure = excluded.smtp_secure,
@@ -174,6 +179,7 @@ export function upsertUserIntegrations(userId, input) {
   ).run(
     userId,
     input.slackWebhookUrl || null,
+    input.slackUserId || null,
     input.smtpHost || null,
     input.smtpPort || null,
     input.smtpSecure ? 1 : 0,
@@ -187,4 +193,21 @@ export function upsertUserIntegrations(userId, input) {
 
 export function getUserIntegrations(userId) {
   return db.prepare("SELECT * FROM user_integrations WHERE user_id = ?").get(userId);
+}
+
+export function upsertIntegrationUrl(userId, { service, url }) {
+  const existing = db.prepare("SELECT id FROM integration_urls WHERE user_id = ? AND service = ?").get(userId, service);
+  const id = existing?.id || nanoid();
+  db.prepare(
+    `INSERT INTO integration_urls (id, user_id, service, url, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+      url = excluded.url,
+      updated_at = excluded.updated_at`
+  ).run(id, userId, service, url, now(), now());
+  return db.prepare("SELECT * FROM integration_urls WHERE id = ?").get(id);
+}
+
+export function listIntegrationUrls(userId) {
+  return db.prepare("SELECT id, service, url, created_at, updated_at FROM integration_urls WHERE user_id = ? ORDER BY updated_at DESC").all(userId);
 }

@@ -18,17 +18,17 @@ let token = "";
 let taskId = "";
 
 test("login and get session", async () => {
-  const signup = await request(app).post("/api/auth/signup").send({ email: "test@mcpops.dev", password: "testpass123" });
+  const signup = await request(app).post("/api/auth/signup").send({ email: "test@gmail.com", password: "testpass123" });
   assert.equal(signup.status, 201);
 
-  const login = await request(app).post("/api/auth/login").send({ email: "test@mcpops.dev", password: "testpass123" });
+  const login = await request(app).post("/api/auth/login").send({ email: "test@gmail.com", password: "testpass123" });
   assert.equal(login.status, 200);
   assert.ok(login.body.token);
   token = login.body.token;
 
   const me = await request(app).get("/api/me").set("Authorization", `Bearer ${token}`);
   assert.equal(me.status, 200);
-  assert.equal(me.body.user.email, "test@mcpops.dev");
+  assert.equal(me.body.user.email, "test@gmail.com");
 });
 
 test("install template and list tasks", async () => {

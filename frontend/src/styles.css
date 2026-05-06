@@ -53,6 +53,19 @@ button { background: var(--accent); color: #fff; border: none; cursor: pointer; 
 .list li { border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem; background: #fff; }
 .list p, .list small { margin: 0.25rem 0; color: var(--muted); }
 .actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 1000;
+}
+.modal-card {
+  width: min(640px, 100%);
+}
 
 @media (max-width: 900px) {
   .grid, .cards { grid-template-columns: 1fr; }

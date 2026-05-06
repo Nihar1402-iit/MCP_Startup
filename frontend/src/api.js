@@ -21,6 +21,7 @@ async function req(path, options = {}) {
 }
 
 export const api = {
+  validateEmail: (email) => req("/api/auth/validate-email", { method: "POST", body: JSON.stringify({ email }) }),
   signup: async (email, password) => req("/api/auth/signup", { method: "POST", body: JSON.stringify({ email, password }) }),
   login: async (email, password) => {
     const result = await req("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
@@ -35,6 +36,10 @@ export const api = {
   me: () => req("/api/me"),
   getIntegrations: () => req("/api/integrations"),
   saveIntegrations: (payload) => req("/api/integrations", { method: "POST", body: JSON.stringify(payload) }),
+  listIntegrationUrls: () => req("/api/integrations/urls"),
+  saveIntegrationUrl: (payload) => req("/api/integrations/urls", { method: "POST", body: JSON.stringify(payload) }),
+  getSlackOauthStart: () => req("/api/integrations/slack/oauth/start"),
+  finishSlackOauth: (code) => req("/api/integrations/slack/oauth/callback", { method: "POST", body: JSON.stringify({ code }) }),
   listTemplates: () => req("/api/templates"),
   installTemplate: (id) => req(`/api/templates/${id}/install`, { method: "POST" }),
   listTasks: () => req("/api/tasks"),

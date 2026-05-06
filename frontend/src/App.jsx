@@ -1,35 +1,57 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function Modal({ title, children, onClose }) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-card panel">
+        <div className="actions">
+          <h3>{title}</h3>
+          <button className="ghost" onClick={onClose}>Close</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function Login({ onLogin }) {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("founder@mcpops.dev");
   const [password, setPassword] = useState("");
-  const [integrations, setIntegrations] = useState({
-    slackWebhookUrl: "",
-    smtpHost: "",
-    smtpPort: "587",
-    smtpSecure: false,
-    smtpUser: "",
-    smtpPass: "",
-    smtpFrom: ""
-  });
   const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
 
   async function submit(e) {
     e.preventDefault();
     setError("");
+
+    if (!emailRegex.test(email)) {
+      setError("Please enter a valid email format.");
+      return;
+    }
+
     try {
-      await onLogin(email, password, mode, integrations);
+      setChecking(true);
+      const check = await api.validateEmail(email);
+      if (!check.validFormat || !check.hasMx) {
+        setError("This email domain does not look valid for receiving mail.");
+        return;
+      }
+      await onLogin(email, password, mode);
     } catch (err) {
       setError(err.message);
+    } finally {
+      setChecking(false);
     }
   }
 
   return (
     <section className="panel login">
       <h1>MCP-Ops</h1>
-      <p>Sign in with your account to launch your automation dashboard.</p>
+      <p>Log in with your email and password.</p>
       <form onSubmit={submit} className="task-form one-col">
         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
         <input
@@ -39,49 +61,10 @@ function Login({ onLogin }) {
           placeholder="Password (8+ characters)"
           required
         />
-        <input
-          placeholder="Slack incoming webhook URL (optional)"
-          value={integrations.slackWebhookUrl}
-          onChange={(e) => setIntegrations({ ...integrations, slackWebhookUrl: e.target.value })}
-        />
-        <input
-          placeholder="SMTP host (optional)"
-          value={integrations.smtpHost}
-          onChange={(e) => setIntegrations({ ...integrations, smtpHost: e.target.value })}
-        />
-        <input
-          placeholder="SMTP port (optional)"
-          value={integrations.smtpPort}
-          onChange={(e) => setIntegrations({ ...integrations, smtpPort: e.target.value })}
-        />
-        <input
-          placeholder="SMTP username (optional)"
-          value={integrations.smtpUser}
-          onChange={(e) => setIntegrations({ ...integrations, smtpUser: e.target.value })}
-        />
-        <input
-          type="password"
-          placeholder="SMTP password / app password (optional)"
-          value={integrations.smtpPass}
-          onChange={(e) => setIntegrations({ ...integrations, smtpPass: e.target.value })}
-        />
-        <input
-          placeholder="SMTP from email (optional)"
-          value={integrations.smtpFrom}
-          onChange={(e) => setIntegrations({ ...integrations, smtpFrom: e.target.value })}
-        />
-        <label>
-          <input
-            type="checkbox"
-            checked={Boolean(integrations.smtpSecure)}
-            onChange={(e) => setIntegrations({ ...integrations, smtpSecure: e.target.checked })}
-          />{" "}
-          Use secure SMTP (SSL/TLS)
-        </label>
-        <button type="submit">{mode === "login" ? "Log In" : "Create Account"}</button>
+        <button type="submit" disabled={checking}>{checking ? "Checking email..." : mode === "login" ? "Log In" : "Create Account"}</button>
       </form>
       <div className="actions">
-        <button className="ghost" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
+        <button className="ghost" onClick={() => setMode(mode === "login" ? "signup" : "login")}> 
           {mode === "login" ? "Need an account? Sign up" : "Already have an account? Log in"}
         </button>
       </div>
@@ -98,41 +81,20 @@ function App() {
   const [logs, setLogs] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [team, setTeam] = useState([]);
+  const [integrationUrls, setIntegrationUrls] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ name: "", command: "", scheduleExpr: "", roleRequired: "editor" });
   const [alertForm, setAlertForm] = useState({ channel: "slack", target: "", severity: "failed" });
-  const [integrations, setIntegrations] = useState({
-    slackWebhookUrl: "",
-    smtpHost: "",
-    smtpPort: "587",
-    smtpSecure: false,
-    smtpUser: "",
-    smtpPass: "",
-    smtpFrom: ""
-  });
-  const [emailAutomation, setEmailAutomation] = useState({
-    recipient: "",
-    subject: "Daily startup update",
-    message: "Hi team, here is today's update.",
-    scheduleExpr: "0 18 * * 1-5"
-  });
+  const [integrations, setIntegrations] = useState({ slackWebhookUrl: "", slackUserId: "" });
+  const [modal, setModal] = useState(null);
+  const [serviceForm, setServiceForm] = useState({ service: "", url: "" });
 
   const isAdmin = useMemo(() => user?.role === "admin", [user]);
 
-  async function login(email, password, mode, onboardingIntegrations) {
+  async function login(email, password, mode) {
     if (mode === "signup") await api.signup(email, password);
     await api.login(email, password);
-    const hasIntegrations = Object.values(onboardingIntegrations || {}).some((v) => {
-      if (typeof v === "boolean") return v;
-      return String(v || "").trim() !== "";
-    });
-    if (hasIntegrations) {
-      await api.saveIntegrations({
-        ...onboardingIntegrations,
-        smtpPort: Number(onboardingIntegrations.smtpPort || 0)
-      });
-    }
     await load();
   }
 
@@ -142,20 +104,22 @@ function App() {
     try {
       const me = await api.me();
       setUser(me.user);
-      const [tplRes, tasksRes, runsRes, logsRes, alertsRes, integrationsRes] = await Promise.all([
+      const [tplRes, tasksRes, runsRes, logsRes, alertsRes, integrationsRes, urlsRes] = await Promise.all([
         api.listTemplates(),
         api.listTasks(),
         api.listRuns(),
         api.listAudit(),
         api.listAlerts(),
-        api.getIntegrations()
+        api.getIntegrations(),
+        api.listIntegrationUrls()
       ]);
       setTemplates(tplRes.templates || []);
       setTasks(tasksRes.tasks || []);
       setRuns(runsRes.runs || []);
       setLogs(logsRes.logs || []);
       setAlerts(alertsRes.alerts || []);
-      setIntegrations(integrationsRes.integrations || {});
+      setIntegrations(integrationsRes.integrations || { slackWebhookUrl: "", slackUserId: "" });
+      setIntegrationUrls(urlsRes.urls || []);
       if (me.user.role === "admin") {
         const teamRes = await api.listTeam();
         setTeam(teamRes.users || []);
@@ -171,6 +135,22 @@ function App() {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    async function finishSlackOauth() {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get("code");
+      if (!code || !user) return;
+      try {
+        await api.finishSlackOauth(code);
+        window.history.replaceState({}, "", window.location.pathname);
+        await load();
+      } catch (err) {
+        setError(err.message);
+      }
+    }
+    finishSlackOauth();
+  }, [user]);
 
   async function createTask(e) {
     e.preventDefault();
@@ -229,35 +209,6 @@ function App() {
     }
   }
 
-  async function createEmailAutomation(e) {
-    e.preventDefault();
-    try {
-      const taskName = `Email: ${emailAutomation.subject}`;
-      const command = `echo "${emailAutomation.message.replaceAll('"', "'")}"`;
-      await api.createTask({
-        name: taskName,
-        command,
-        scheduleExpr: emailAutomation.scheduleExpr || undefined,
-        triggerType: emailAutomation.scheduleExpr ? "schedule" : "manual",
-        roleRequired: "editor"
-      });
-      await api.createAlert({
-        channel: "email",
-        target: emailAutomation.recipient,
-        severity: "all"
-      });
-      setEmailAutomation({
-        recipient: "",
-        subject: "Daily startup update",
-        message: "Hi team, here is today's update.",
-        scheduleExpr: "0 18 * * 1-5"
-      });
-      await load();
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
   async function exportAudit() {
     const csv = await api.exportAudit();
     const blob = new Blob([csv], { type: "text/csv" });
@@ -269,13 +220,32 @@ function App() {
     URL.revokeObjectURL(url);
   }
 
-  async function saveIntegrations(e) {
+  async function saveSlackWebhook(e) {
     e.preventDefault();
     try {
-      await api.saveIntegrations({
-        ...integrations,
-        smtpPort: Number(integrations.smtpPort || 0)
-      });
+      await api.saveIntegrations({ slackWebhookUrl: integrations.slackWebhookUrl });
+      await load();
+      setModal(null);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function startSlackOauth() {
+    try {
+      const { authUrl } = await api.getSlackOauthStart();
+      window.location.href = authUrl;
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function saveServiceUrl(e) {
+    e.preventDefault();
+    try {
+      await api.saveIntegrationUrl(serviceForm);
+      setServiceForm({ service: "", url: "" });
+      setModal(null);
       await load();
     } catch (err) {
       setError(err.message);
@@ -293,91 +263,27 @@ function App() {
     <div className="app">
       <header className="hero">
         <h1>MCP-Ops</h1>
-        <p>
-          Signed in as <strong>{user?.email}</strong> ({user?.role})
-        </p>
-        <p>Set up human-friendly automations: emails, alerts, tickets, reports, and scheduled ops.</p>
+        <p>Signed in as <strong>{user?.email}</strong> ({user?.role})</p>
+        <p>Enable optional features only when you need them.</p>
         <button className="ghost" onClick={logout}>Log out</button>
       </header>
 
       {error ? <div className="error">{error}</div> : null}
 
       <section className="panel">
-        <h2>Connect Slack and Email</h2>
-        <p>Add your Slack webhook and SMTP login so alerts are delivered for real.</p>
-        <form onSubmit={saveIntegrations} className="task-form one-col">
-          <input
-            placeholder="Slack incoming webhook URL"
-            value={integrations.slackWebhookUrl || ""}
-            onChange={(e) => setIntegrations({ ...integrations, slackWebhookUrl: e.target.value })}
-          />
-          <input
-            placeholder="SMTP host (example: smtp.gmail.com)"
-            value={integrations.smtpHost || ""}
-            onChange={(e) => setIntegrations({ ...integrations, smtpHost: e.target.value })}
-          />
-          <input
-            placeholder="SMTP port (example: 587)"
-            value={integrations.smtpPort || ""}
-            onChange={(e) => setIntegrations({ ...integrations, smtpPort: e.target.value })}
-          />
-          <label>
-            <input
-              type="checkbox"
-              checked={Boolean(integrations.smtpSecure)}
-              onChange={(e) => setIntegrations({ ...integrations, smtpSecure: e.target.checked })}
-            />{" "}
-            Use TLS/SSL (`secure`)
-          </label>
-          <input
-            placeholder="SMTP username"
-            value={integrations.smtpUser || ""}
-            onChange={(e) => setIntegrations({ ...integrations, smtpUser: e.target.value })}
-          />
-          <input
-            type="password"
-            placeholder="SMTP password / app password"
-            value={integrations.smtpPass || ""}
-            onChange={(e) => setIntegrations({ ...integrations, smtpPass: e.target.value })}
-          />
-          <input
-            placeholder="From email (optional)"
-            value={integrations.smtpFrom || ""}
-            onChange={(e) => setIntegrations({ ...integrations, smtpFrom: e.target.value })}
-          />
-          <button type="submit">Save Integrations</button>
-        </form>
-      </section>
-
-      <section className="panel">
-        <h2>Quick Setup: Send Automatic Email</h2>
-        <p>Create a scheduled email-style automation in one form. No scripting required.</p>
-        <form onSubmit={createEmailAutomation} className="task-form one-col">
-          <input
-            placeholder="Recipient email (example: team@company.com)"
-            value={emailAutomation.recipient}
-            onChange={(e) => setEmailAutomation({ ...emailAutomation, recipient: e.target.value })}
-            required
-          />
-          <input
-            placeholder="Subject"
-            value={emailAutomation.subject}
-            onChange={(e) => setEmailAutomation({ ...emailAutomation, subject: e.target.value })}
-            required
-          />
-          <input
-            placeholder="Message"
-            value={emailAutomation.message}
-            onChange={(e) => setEmailAutomation({ ...emailAutomation, message: e.target.value })}
-            required
-          />
-          <input
-            placeholder="Schedule (cron, example: 0 18 * * 1-5)"
-            value={emailAutomation.scheduleExpr}
-            onChange={(e) => setEmailAutomation({ ...emailAutomation, scheduleExpr: e.target.value })}
-          />
-          <button type="submit">Create Email Automation</button>
-        </form>
+        <h2>Feature Integrations</h2>
+        <p>When you enable a feature, we ask for required URL/credentials in a pop-up.</p>
+        <div className="actions">
+          <button onClick={() => setModal("slack")}>Do you want to integrate Slack?</button>
+          <button className="ghost" onClick={() => setModal("service-url")}>Enter additional service URLs</button>
+        </div>
+        <ul className="list">
+          {integrations.slackWebhookUrl ? <li><strong>Slack Webhook:</strong><p>{integrations.slackWebhookUrl}</p></li> : null}
+          {integrations.slackUserId ? <li><strong>Slack User ID:</strong><p>{integrations.slackUserId}</p></li> : null}
+          {integrationUrls.map((u) => (
+            <li key={u.id}><strong>{u.service}</strong><p>{u.url}</p></li>
+          ))}
+        </ul>
       </section>
 
       <section className="panel">
@@ -398,17 +304,8 @@ function App() {
         <h2>Create Task</h2>
         <form className="task-form" onSubmit={createTask}>
           <input placeholder="Task name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-          <input
-            placeholder="Command (example: npm run lint)"
-            value={form.command}
-            onChange={(e) => setForm({ ...form, command: e.target.value })}
-            required
-          />
-          <input
-            placeholder="Optional cron schedule"
-            value={form.scheduleExpr}
-            onChange={(e) => setForm({ ...form, scheduleExpr: e.target.value })}
-          />
+          <input placeholder="Command (example: npm run lint)" value={form.command} onChange={(e) => setForm({ ...form, command: e.target.value })} required />
+          <input placeholder="Optional cron schedule" value={form.scheduleExpr} onChange={(e) => setForm({ ...form, scheduleExpr: e.target.value })} />
           <select value={form.roleRequired} onChange={(e) => setForm({ ...form, roleRequired: e.target.value })}>
             <option value="admin">Admin</option>
             <option value="editor">Editor</option>
@@ -429,9 +326,7 @@ function App() {
                 <small>schedule: {task.schedule_expr || "manual"}</small>
                 <div className="actions">
                   <button onClick={() => runTask(task.id)}>Run now</button>
-                  <button className="ghost" onClick={() => addSchedule(task.id)}>
-                    Set schedule
-                  </button>
+                  <button className="ghost" onClick={() => addSchedule(task.id)}>Set schedule</button>
                 </div>
               </li>
             ))}
@@ -446,12 +341,7 @@ function App() {
               <option value="email">Email</option>
               <option value="webhook">Webhook</option>
             </select>
-            <input
-              placeholder="#devops-alerts or user@example.com"
-              value={alertForm.target}
-              onChange={(e) => setAlertForm({ ...alertForm, target: e.target.value })}
-              required
-            />
+            <input placeholder="#devops-alerts or user@example.com" value={alertForm.target} onChange={(e) => setAlertForm({ ...alertForm, target: e.target.value })} required />
             <select value={alertForm.severity} onChange={(e) => setAlertForm({ ...alertForm, severity: e.target.value })}>
               <option value="failed">Failed only</option>
               <option value="all">All runs</option>
@@ -491,9 +381,7 @@ function App() {
             {logs.map((log) => (
               <li key={log.id}>
                 <strong>{log.action}</strong>
-                <p>
-                  {log.actor} | {log.status}
-                </p>
+                <p>{log.actor} | {log.status}</p>
                 <small>{log.created_at}</small>
               </li>
             ))}
@@ -514,6 +402,32 @@ function App() {
           </div>
         ) : null}
       </section>
+
+      {modal === "slack" ? (
+        <Modal title="Integrate Slack" onClose={() => setModal(null)}>
+          <p>Do you want to integrate Slack? You can paste a webhook URL or use Slack OAuth.</p>
+          <form onSubmit={saveSlackWebhook} className="task-form one-col">
+            <input
+              placeholder="Slack webhook URL"
+              value={integrations.slackWebhookUrl || ""}
+              onChange={(e) => setIntegrations({ ...integrations, slackWebhookUrl: e.target.value })}
+            />
+            <button type="submit">Save Webhook</button>
+          </form>
+          <button onClick={startSlackOauth}>Log in with Slack (OAuth)</button>
+        </Modal>
+      ) : null}
+
+      {modal === "service-url" ? (
+        <Modal title="Additional Service URLs" onClose={() => setModal(null)}>
+          <p>Enter any extra integration URL you want to use later.</p>
+          <form onSubmit={saveServiceUrl} className="task-form one-col">
+            <input placeholder="Service name (example: GitHub Webhook)" value={serviceForm.service} onChange={(e) => setServiceForm({ ...serviceForm, service: e.target.value })} required />
+            <input placeholder="https://..." value={serviceForm.url} onChange={(e) => setServiceForm({ ...serviceForm, url: e.target.value })} required />
+            <button type="submit">Save URL</button>
+          </form>
+        </Modal>
+      ) : null}
     </div>
   );
 }

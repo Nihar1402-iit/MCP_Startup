@@ -49,12 +49,23 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE TABLE IF NOT EXISTS user_integrations (
   user_id TEXT PRIMARY KEY,
   slack_webhook_url TEXT,
+  slack_user_id TEXT,
   smtp_host TEXT,
   smtp_port INTEGER,
   smtp_secure INTEGER NOT NULL DEFAULT 0,
   smtp_user TEXT,
   smtp_pass TEXT,
   smtp_from TEXT,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS integration_urls (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  service TEXT NOT NULL,
+  url TEXT NOT NULL,
+  created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY(user_id) REFERENCES users(id)
 );

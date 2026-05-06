@@ -2,6 +2,8 @@ import cors from "cors";
 import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import crypto from "node:crypto";
+import { hasMxRecord, isValidEmailFormat, isValidUrl } from "./auth.js";
 import {
   addAuditLog,
   createAlertSetting,
@@ -12,10 +14,12 @@ import {
   getUserIntegrations,
   listAlertSettings,
   listAuditLogs,
+  listIntegrationUrls,
   listRuns,
   listTasks,
   listUsers,
   setUserPassword,
+  upsertIntegrationUrl,
   upsertUserIntegrations
 } from "./store.js";
 import { runTask, syncAllSchedules, upsertSchedule } from "./scheduler.js";
@@ -24,6 +28,10 @@ import { db } from "./db.js";
 export const app = express();
 const port = process.env.PORT || 4000;
 const jwtSecret = process.env.JWT_SECRET || "dev-only-change-me";
+const appBaseUrl = process.env.APP_BASE_URL || "http://localhost:5173";
+const slackClientId = process.env.SLACK_CLIENT_ID || "";
+const slackClientSecret = process.env.SLACK_CLIENT_SECRET || "";
+const slackRedirectUri = process.env.SLACK_REDIRECT_URI || `${appBaseUrl}/slack/callback`;
 
 app.use(cors());
 app.use(express.json());
@@ -138,10 +146,21 @@ app.get("/health", (_, res) => {
   res.json({ ok: true, service: "mcp-ops-backend", timestamp: new Date().toISOString() });
 });
 
+app.post("/api/auth/validate-email", async (req, res) => {
+  const { email } = req.body || {};
+  const validFormat = isValidEmailFormat(email);
+  if (!validFormat) return res.json({ validFormat, hasMx: false });
+  const hasMx = await hasMxRecord(email);
+  return res.json({ validFormat, hasMx });
+});
+
 app.post("/api/auth/signup", async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: "email and password required" });
   if (String(password).length < 8) return res.status(400).json({ error: "password must be at least 8 characters" });
+  if (!isValidEmailFormat(email)) return res.status(400).json({ error: "Invalid email format" });
+  const mx = await hasMxRecord(email);
+  if (!mx) return res.status(400).json({ error: "Email domain does not look deliverable (MX check failed)" });
 
   const passwordHash = await bcrypt.hash(password, 10);
   const user = createUser({ email, passwordHash });
@@ -176,6 +195,7 @@ app.get("/api/integrations", auth, (req, res) => {
   res.json({
     integrations: {
       slackWebhookUrl: cfg.slack_webhook_url || "",
+      slackUserId: cfg.slack_user_id || "",
       smtpHost: cfg.smtp_host || "",
       smtpPort: cfg.smtp_port || "",
       smtpSecure: Boolean(cfg.smtp_secure),
@@ -186,9 +206,57 @@ app.get("/api/integrations", auth, (req, res) => {
   });
 });
 app.post("/api/integrations", auth, requireRole(["admin", "editor"]), (req, res) => {
+  if (req.body?.slackWebhookUrl && !isValidUrl(req.body.slackWebhookUrl)) {
+    return res.status(400).json({ error: "Slack webhook URL must be a valid URL" });
+  }
   const row = upsertUserIntegrations(req.user.user_id, req.body || {});
   addAuditLog({ actor: req.user.email, action: "integrations.update", status: "success" });
   res.json({ integrations: row });
+});
+app.get("/api/integrations/urls", auth, (req, res) => res.json({ urls: listIntegrationUrls(req.user.user_id) }));
+app.post("/api/integrations/urls", auth, requireRole(["admin", "editor"]), (req, res) => {
+  const { service, url } = req.body || {};
+  if (!service || !url) return res.status(400).json({ error: "service and url are required" });
+  if (!isValidUrl(url)) return res.status(400).json({ error: "Please provide a valid http/https URL" });
+  const row = upsertIntegrationUrl(req.user.user_id, { service, url });
+  addAuditLog({ actor: req.user.email, action: "integrations.url.upsert", status: "success", metadata: { service } });
+  res.json({ item: row });
+});
+
+app.get("/api/integrations/slack/oauth/start", auth, (req, res) => {
+  if (!slackClientId || !slackClientSecret) {
+    return res.status(400).json({ error: "Slack OAuth not configured on server (missing SLACK_CLIENT_ID/SECRET)" });
+  }
+  const state = crypto.randomBytes(12).toString("hex");
+  const scope = encodeURIComponent("incoming-webhook,chat:write");
+  const authUrl = `https://slack.com/oauth/v2/authorize?client_id=${encodeURIComponent(slackClientId)}&scope=${scope}&redirect_uri=${encodeURIComponent(slackRedirectUri)}&state=${state}`;
+  res.json({ authUrl, state });
+});
+
+app.post("/api/integrations/slack/oauth/callback", auth, requireRole(["admin", "editor"]), async (req, res) => {
+  const { code } = req.body || {};
+  if (!code) return res.status(400).json({ error: "Missing OAuth code" });
+  const tokenRes = await fetch("https://slack.com/api/oauth.v2.access", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: slackClientId,
+      client_secret: slackClientSecret,
+      code,
+      redirect_uri: slackRedirectUri
+    })
+  });
+  const tokenBody = await tokenRes.json();
+  if (!tokenBody.ok) return res.status(400).json({ error: `Slack OAuth failed: ${tokenBody.error || "unknown"}` });
+  const slackUserId = tokenBody.authed_user?.id || tokenBody.bot_user_id || "";
+  const webhook = tokenBody.incoming_webhook?.url || "";
+  const integrations = upsertUserIntegrations(req.user.user_id, {
+    ...(getUserIntegrations(req.user.user_id) || {}),
+    slackUserId,
+    slackWebhookUrl: webhook
+  });
+  addAuditLog({ actor: req.user.email, action: "integrations.slack.oauth", status: "success", metadata: { slackUserId } });
+  res.json({ integrations });
 });
 app.get("/api/templates", auth, (_, res) => res.json({ templates }));
 
