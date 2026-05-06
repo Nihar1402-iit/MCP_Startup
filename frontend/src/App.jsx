@@ -21,6 +21,7 @@ function Login({ onLogin }) {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("founder@mcpops.dev");
   const [password, setPassword] = useState("");
+  const [apiBase, setApiBase] = useState(api.getApiBase() || "");
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
 
@@ -35,6 +36,7 @@ function Login({ onLogin }) {
 
     try {
       setChecking(true);
+      await api.setApiBase(apiBase);
       try {
         const check = await api.validateEmail(email);
         if (!check.validFormat || !check.hasMx) {
@@ -57,6 +59,12 @@ function Login({ onLogin }) {
       <h1>MCP-Ops</h1>
       <p>Log in with your email and password.</p>
       <form onSubmit={submit} className="task-form one-col">
+        <input
+          value={apiBase}
+          onChange={(e) => setApiBase(e.target.value)}
+          placeholder="Backend URL (example: https://your-backend.onrender.com)"
+          required
+        />
         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Enter your email" required />
         <input
           type="password"
@@ -137,7 +145,10 @@ function App() {
   }
 
   useEffect(() => {
-    load();
+    (async () => {
+      await api.discoverApiBase();
+      await load();
+    })();
   }, []);
 
   useEffect(() => {

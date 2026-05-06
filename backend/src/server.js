@@ -145,6 +145,9 @@ function requireRole(roles) {
 app.get("/health", (_, res) => {
   res.json({ ok: true, service: "mcp-ops-backend", timestamp: new Date().toISOString() });
 });
+app.get("/api/health", (_, res) => {
+  res.json({ ok: true, service: "mcp-ops-backend", timestamp: new Date().toISOString() });
+});
 
 app.post("/api/auth/validate-email", async (req, res) => {
   const { email } = req.body || {};
