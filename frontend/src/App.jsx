@@ -35,10 +35,14 @@ function Login({ onLogin }) {
 
     try {
       setChecking(true);
-      const check = await api.validateEmail(email);
-      if (!check.validFormat || !check.hasMx) {
-        setError("This email domain does not look valid for receiving mail.");
-        return;
+      try {
+        const check = await api.validateEmail(email);
+        if (!check.validFormat || !check.hasMx) {
+          setError("This email domain does not look valid for receiving mail.");
+          return;
+        }
+      } catch {
+        // If backend doesn't expose validate-email yet, continue with format-only validation.
       }
       await onLogin(email, password, mode);
     } catch (err) {
