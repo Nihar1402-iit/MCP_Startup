@@ -53,7 +53,7 @@ function Login({ onLogin }) {
       <h1>MCP-Ops</h1>
       <p>Log in with your email and password.</p>
       <form onSubmit={submit} className="task-form one-col">
-        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
+        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Enter your email" required />
         <input
           type="password"
           value={password}
